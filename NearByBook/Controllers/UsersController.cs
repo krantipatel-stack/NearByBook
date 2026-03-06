@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
@@ -15,6 +16,7 @@ using System.Text;
 public class UsersController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
+    private readonly IConfiguration _configuration;
 
     public UsersController(ApplicationDbContext context, IConfiguration configuration)
     {
@@ -71,14 +73,6 @@ public class UsersController : ControllerBase
 
         var token = GenerateJwtToken(user);
 
-        // Store token in cookie
-        Response.Cookies.Append("jwt", token, new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = false, // true in production (HTTPS)
-            SameSite = SameSiteMode.Strict,
-            Expires = DateTime.UtcNow.AddMinutes(60)
-        });
 
         return Ok(new
         {
@@ -87,6 +81,43 @@ public class UsersController : ControllerBase
         });
     }
 
+
+    [Authorize]
+    [HttpPost("add")]
+    public async Task<IActionResult> AddBook(CreateBookDto dto)
+    {
+        // 🔐 Check if user authenticated
+        if (!User.Identity.IsAuthenticated)
+            return Unauthorized("User is not authenticated.");
+
+        // 🔥 Get UserId from JWT token
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+
+        if (userIdClaim == null)
+            return Unauthorized("Invalid token.");
+
+        int userId = int.Parse(userIdClaim.Value);
+
+        var book = new Book
+        {
+            Title = dto.Title,
+            Author = dto.Author,
+            Category = dto.Category,
+            Condition = dto.Condition,
+            Price = dto.Price,
+            Description = dto.Description,
+            SellerId = userId, // 🔥 assign from token
+            IsApproved = false
+        };
+
+        _context.Books.Add(book);
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            Message = "Book submitted successfully. Waiting for admin approval."
+        });
+    }
 
     private string HashPassword(string password)
     {
@@ -107,19 +138,18 @@ public class UsersController : ControllerBase
         var claims = new[]
         {
         new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-        new Claim(ClaimTypes.Email, user.Email),
         new Claim(ClaimTypes.Role, user.Role)
     };
 
         var token = new JwtSecurityToken(
             issuer: jwtSettings["Issuer"],
             audience: jwtSettings["Audience"],
+            expires : DateTime.UtcNow.AddMinutes(10), // 👈 10 minutes validity
             claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(
-                Convert.ToDouble(jwtSettings["DurationInMinutes"])),
             signingCredentials: creds
         );
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
+
 }

@@ -30,4 +30,7 @@ public class User
     public bool IsActive { get; set; } = true;
 
     public string Role { get; set; } = "User";
+
+    public ICollection<Book> Books { get; set; }
+
 }
